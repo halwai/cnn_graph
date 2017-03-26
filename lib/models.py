@@ -795,7 +795,7 @@ class cgcnn(base_model):
             print('  layer {0}: cgconv{0}'.format(i+1))
             print('    representation: M_{0} * F_{1} / p_{1} = {2} * {3} / {4} = {5}'.format(
                     i, i+1, L[i].shape[0], F[i], p[i], L[i].shape[0]*F[i]//p[i]))
-            F_last = F[i-1] if i > 0 else 1
+            F_last = F[i-1] if i > 0 else F_0
             print('    weights: F_{0} * F_{1} * K_{1} = {2} * {3} * {4} = {5}'.format(
                     i, i+1, F_last, F[i], K[i], F_last*F[i]*K[i]))
             if brelu == 'b1relu':
