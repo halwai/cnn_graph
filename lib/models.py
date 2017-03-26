@@ -99,13 +99,13 @@ class base_model(object):
         path = os.path.join(self._get_path('checkpoints'), 'model')
         sess.run(self.op_init)
         
-        assert train_data.shape[2] == val_data.shape[2]
         if len(train_data.shape) is 2:
+            assert train_data.shape[-1] == val_data.shape[-1]
             train_data = np.expand_dims(train_data,2) # N * M * F(=1)
             val_data = np.expand_dims(val_data,2) # N * M * F(=1)
         
-        assert train_labels.shape[1] == val_labels.shape[1]
         if len(train_labels.shape) is 1:
+            assert train_labels.shape[-1] == val_labels.shape[-1]
             train_labels = np.expand_dims(train_labels,1) # N * F(=1)
             val_labels = np.expand_dims(val_labels,1) # N * F(=1)
             
