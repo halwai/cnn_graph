@@ -61,7 +61,7 @@ def adjacency(dist, idx):
     assert dist.min() >= 0
 
     # Weights.
-    sigma2 = np.mean(dist[:, -1])**2
+    sigma2 = np.mean(dist[:, -1])**2 # ??? q
     dist = np.exp(- dist**2 / sigma2)
 
     # Weight matrix.

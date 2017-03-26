@@ -24,30 +24,35 @@ class base_model(object):
     def predict(self, data, labels=None, sess=None):
         loss = 0
         size = data.shape[0]
-        predictions = np.empty(size)
+        predictions = np.empty((size, labels.shape[1]))
         sess = self._get_session(sess)
+        if len(data.shape) is 2:
+            data = np.expand_dims(data, 2) # N * M * F(=1)
+        if len(labels.shape) is 1:
+            labels = np.expand_dims(labels, 1) # N * F(=1)
+            
         for begin in range(0, size, self.batch_size):
             end = begin + self.batch_size
             end = min([end, size])
             
-            batch_data = np.zeros((self.batch_size, data.shape[1]))
-            tmp_data = data[begin:end,:]
+            batch_data = np.zeros((self.batch_size, data.shape[1], data.shape[2]))
+            tmp_data = data[begin:end,:,:]
             if type(tmp_data) is not np.ndarray:
                 tmp_data = tmp_data.toarray()  # convert sparse matrices
-            batch_data[:end-begin] = tmp_data
+            batch_data[:end-begin,:,:] = tmp_data
             feed_dict = {self.ph_data: batch_data, self.ph_dropout: 1}
             
             # Compute loss if labels are given.
             if labels is not None:
-                batch_labels = np.zeros(self.batch_size)
-                batch_labels[:end-begin] = labels[begin:end]
+                batch_labels = np.zeros((self.batch_size, labels.shape[1]))
+                batch_labels[:end-begin,:] = labels[begin:end,:]
                 feed_dict[self.ph_labels] = batch_labels
                 batch_pred, batch_loss = sess.run([self.op_prediction, self.op_loss], feed_dict)
                 loss += batch_loss
             else:
                 batch_pred = sess.run(self.op_prediction, feed_dict)
             
-            predictions[begin:end] = batch_pred[:end-begin]
+            predictions[begin:end,:] = batch_pred[:end-begin,:]
             
         if labels is not None:
             return predictions, loss * self.batch_size / size
@@ -65,17 +70,21 @@ class base_model(object):
         data: size N x M
             N: number of signals (samples)
             M: number of vertices (features)
-        labels: size N
+        labels: size N x F_last
             N: number of signals (samples)
+            F_last: Multilabel Problem (= #of classes)
         """
         t_process, t_wall = time.process_time(), time.time()
         predictions, loss = self.predict(data, labels, sess)
         #print(predictions)
-        ncorrects = sum(predictions == labels)
+        #evaluation metrics -- f1, precision, recall...
+        labels = np.argmax(labels, axis=1)
+        predictions =  np.argmax(predictions, axis= 1)
+        ncorrects = np.sum(predictions == labels)
         accuracy = 100 * sklearn.metrics.accuracy_score(labels, predictions)
-        f1 = 100 * sklearn.metrics.f1_score(labels, predictions, average='weighted')
+        f1 = 0 #100 * sklearn.metrics.f1_score(labels, predictions, average='weighted')
         string = 'accuracy: {:.2f} ({:d} / {:d}), f1 (weighted): {:.2f}, loss: {:.2e}'.format(
-                accuracy, ncorrects, len(labels), f1, loss)
+                accuracy, ncorrects, labels.shape[0], f1, loss)
         if sess is None:
             string += '\ntime: {:.0f}s (wall {:.0f}s)'.format(time.process_time()-t_process, time.time()-t_wall)
         return string, accuracy, f1, loss
@@ -89,7 +98,17 @@ class base_model(object):
         os.makedirs(self._get_path('checkpoints'))
         path = os.path.join(self._get_path('checkpoints'), 'model')
         sess.run(self.op_init)
-
+        
+        assert train_data.shape[2] == val_data.shape[2]
+        if len(train_data.shape) is 2:
+            train_data = np.expand_dims(train_data,2) # N * M * F(=1)
+            val_data = np.expand_dims(val_data,2) # N * M * F(=1)
+        
+        assert train_labels.shape[1] == val_labels.shape[1]
+        if len(train_labels.shape) is 1:
+            train_labels = np.expand_dims(train_labels,1) # N * F(=1)
+            val_labels = np.expand_dims(val_labels,1) # N * F(=1)
+            
         # Training.
         accuracies = []
         losses = []
@@ -102,7 +121,7 @@ class base_model(object):
                 indices.extend(np.random.permutation(train_data.shape[0]))
             idx = [indices.popleft() for i in range(self.batch_size)]
 
-            batch_data, batch_labels = train_data[idx,:], train_labels[idx]
+            batch_data, batch_labels = train_data[idx,:,:], train_labels[idx,:]
             if type(batch_data) is not np.ndarray:
                 batch_data = batch_data.toarray()  # convert sparse matrices
             feed_dict = {self.ph_data: batch_data, self.ph_labels: batch_labels, self.ph_dropout: self.dropout}
@@ -146,15 +165,15 @@ class base_model(object):
 
     # Methods to construct the computational graph.
     
-    def build_graph(self, M_0):
+    def build_graph(self, M_0, F_0, F_last):
         """Build the computational graph of the model."""
         self.graph = tf.Graph()
         with self.graph.as_default():
 
             # Inputs.
             with tf.name_scope('inputs'):
-                self.ph_data = tf.placeholder(tf.float32, (self.batch_size, M_0), 'data')
-                self.ph_labels = tf.placeholder(tf.int32, (self.batch_size), 'labels')
+                self.ph_data = tf.placeholder(tf.float32, (self.batch_size, M_0, F_0), 'data')
+                self.ph_labels = tf.placeholder(tf.int32, (self.batch_size, F_last), 'labels')
                 self.ph_dropout = tf.placeholder(tf.float32, (), 'dropout')
 
             # Model.
@@ -197,17 +216,21 @@ class base_model(object):
             return probabilities
 
     def prediction(self, logits):
-        """Return the predicted classes."""
+        #"""Return the predicted classes."""
+        """Return the predicted values."""
         with tf.name_scope('prediction'):
-            prediction = tf.argmax(logits, axis=1)
-            return prediction
+            #prediction = tf.nn.softmax(logits)
+            #return prediction
+            return logits
 
     def loss(self, logits, labels, regularization):
         """Adds to the inference model the layers required to generate loss."""
         with tf.name_scope('loss'):
             with tf.name_scope('cross_entropy'):
-                labels = tf.to_int64(labels)
-                cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits, labels=labels)
+                labels = tf.cast(labels,tf.float32)
+                #cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits, labels=labels)
+                # cross entopy loss for multilablel problem
+                cross_entropy = tf.reduce_sum(tf.multiply(labels, -tf.log(tf.nn.softmax(logits))), axis=1) 
                 cross_entropy = tf.reduce_mean(cross_entropy)
             with tf.name_scope('regularization'):
                 regularization *= tf.add_n(self.regularizers)
@@ -741,7 +764,7 @@ class cgcnn(base_model):
     Directories:
         dir_name: Name for directories (summaries and model parameters).
     """
-    def __init__(self, L, F, K, p, M, filter='chebyshev5', brelu='b1relu', pool='mpool1',
+    def __init__(self, L, F, F_0, K, p, M, filter='chebyshev5', brelu='b1relu', pool='mpool1',
                 num_epochs=20, learning_rate=0.1, decay_rate=0.95, decay_steps=None, momentum=0.9,
                 regularization=0, dropout=0, batch_size=100, eval_frequency=200,
                 dir_name=''):
@@ -801,7 +824,7 @@ class cgcnn(base_model):
         self.pool = getattr(self, pool)
         
         # Build the computational graph.
-        self.build_graph(M_0)
+        self.build_graph(M_0, F_0, M[-1])
         
     def filter_in_fourier(self, x, L, Fout, K, U, W):
         # TODO: N x F x M would avoid the permutations
@@ -950,7 +973,9 @@ class cgcnn(base_model):
 
     def _inference(self, x, dropout):
         # Graph convolutional layers.
-        x = tf.expand_dims(x, 2)  # N x M x F=1
+        if len(x.shape) is 2:
+            x = tf.expand_dims(x, 2)  # N x M x F(=1)
+            
         for i in range(len(self.p)):
             with tf.variable_scope('conv{}'.format(i+1)):
                 with tf.name_scope('filter'):
