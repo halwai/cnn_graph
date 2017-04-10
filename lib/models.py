@@ -18,10 +18,85 @@ class base_model(object):
     
     def __init__(self):
         self.regularizers = []
+        self.num_labels_per_image = 2
     
     # High-level interface which runs the constructed computational graph.
-    
-    def predict(self, data, labels=None, sess=None):
+    def evaluation_results(self, predictions, labels, label_probability):
+        N = predictions.shape[0]
+        if len(labels.shape) is 2:
+            F_last = labels.shape[1]
+        else:
+            F_last = 1
+            labels = labels.reshape((labels.shape[0],1))
+
+        PR = np.zeros(shape=(F_last,2))
+
+        for i in range(F_last):
+            m1 = np.sum(labels[:,i])
+            m2 = np.sum(predictions[:,i])
+            m3 = np.sum(np.multiply(labels[:,i], predictions[:,i]))
+
+            if m1>0 and m2>0 and m3>0:
+                PR[i,0] = float(m3)/float(m2)
+                PR[i,1] = float(m3)/float(m1)
+        mPR = np.mean(PR, axis=0)
+        precision = mPR[0]
+        recall = mPR[1]
+        f_measure = (2*precision*recall)/(precision+recall)
+
+        mAP = np.zeros(shape=(F_last,1))
+        print(np.sum(predictions * labels), '/' , np.sum(labels), '=' , np.sum(predictions*labels) / np.sum(labels) )
+
+        for i in range(F_last):
+            ground_truth = labels[:,i]
+            prob = label_probability[:,i]
+            pred = predictions[:,i]
+
+            ind = np.argsort(prob)[::-1]    #Descending sort
+            TP = 0
+            count = 0
+            sum_so_far = 0.0
+
+            for j in range(len(prob)):
+                idx = ind[j]
+                if ground_truth[idx] and pred[idx]:
+                    TP += 1
+                if ground_truth[idx]:
+                    count+=1
+                    sum_so_far += TP/count
+            
+            if np.sum(ground_truth) is 0:
+                mAP[i] = 0
+            else:
+                mAP[i] = sum_so_far/np.sum(ground_truth)
+
+        MAP = np.zeros(shape=(N,1))
+
+        for i in range(N):
+            ground_truth = labels[i,:]
+            prob = label_probability[i,:]
+            pred = predictions[i,:]
+            ind = np.argsort(prob)[::-1]    #Descending sort
+            TP = 0
+            count = 0
+            sum_so_far = 0.0
+
+            for j in range(len(prob)):
+                idx = ind[j]
+                if ground_truth[idx] and pred[idx]:
+                    TP += 1
+                if ground_truth[idx]:
+                    count+=1
+                    sum_so_far += TP/count
+
+            if np.sum(ground_truth) is 0:
+                MAP[i] = 0
+            else:
+                MAP[i] = sum_so_far/np.sum(ground_truth)
+
+        return precision, recall, f_measure, mAP, MAP
+
+    def predict(self, data, laplacians, labels=None, sess=None):
         loss = 0
         size = data.shape[0]
         predictions = np.empty((size, labels.shape[1]))
@@ -34,19 +109,38 @@ class base_model(object):
         for begin in range(0, size, self.batch_size):
             end = begin + self.batch_size
             end = min([end, size])
-            
+            #print(begin,end)
+            if len(laplacians) > 0:
+                #single_laplacian =  [q[1] * scipy.sparse.csr_matrix(q[1].shape) for q in laplacians]
+                single_laplacian =  [q[1] * np.zeros(q[1].shape) for q in laplacians]
+                #print(single_laplacian)
+                batch_laplacians = [[] for i in range(len(single_laplacian))]
+                for j in range(len(single_laplacian)):
+                    batch_laplacians[j].extend(laplacians[j][begin:end])
+                    if end - begin < self.batch_size:
+                        for k in range(self.batch_size-end+begin):
+                            batch_laplacians[j].append(single_laplacian[j])
+            else:
+                batch_laplacians = []
+            #print(batch_laplacians)
+            #print(type(batch_laplacians),len(batch_laplacians))
+            #for i in range(len(batch_laplacians)):
+            #    print(type(batch_laplacians[i]),len(batch_laplacians[i]))
+                
             batch_data = np.zeros((self.batch_size, data.shape[1], data.shape[2]))
             tmp_data = data[begin:end,:,:]
             if type(tmp_data) is not np.ndarray:
                 tmp_data = tmp_data.toarray()  # convert sparse matrices
             batch_data[:end-begin,:,:] = tmp_data
-            feed_dict = {self.ph_data: batch_data, self.ph_dropout: 1}
+            
+            feed_dict = {i:d for i,d in zip(self.ph_laplacians,batch_laplacians)}
+            feed_dict.update({self.ph_data: batch_data, self.ph_dropout: 1}) 
             
             # Compute loss if labels are given.
             if labels is not None:
                 batch_labels = np.zeros((self.batch_size, labels.shape[1]))
                 batch_labels[:end-begin,:] = labels[begin:end,:]
-                feed_dict[self.ph_labels] = batch_labels
+                feed_dict.update({self.ph_labels:batch_labels})
                 batch_pred, batch_loss = sess.run([self.op_prediction, self.op_loss], feed_dict)
                 loss += batch_loss
             else:
@@ -59,7 +153,7 @@ class base_model(object):
         else:
             return predictions
         
-    def evaluate(self, data, labels, sess=None):
+    def evaluate(self, data, laplacians, labels, sess=None):
         """
         Runs one evaluation against the full epoch of data.
         Return the precision and the number of correct predictions.
@@ -75,22 +169,30 @@ class base_model(object):
             F_last: Multilabel Problem (= #of classes)
         """
         t_process, t_wall = time.process_time(), time.time()
-        predictions, loss = self.predict(data, labels, sess)
-        #print(predictions)
+        label_probability, loss = self.predict(data, laplacians, labels, sess)
         #evaluation metrics -- f1, precision, recall...
-        labels = np.argmax(labels, axis=1)
-        predictions =  np.argmax(predictions, axis= 1)
-        ncorrects = np.sum(predictions == labels)
-        accuracy = 100 * sklearn.metrics.accuracy_score(labels, predictions)
-        f1 = 0 #100 * sklearn.metrics.f1_score(labels, predictions, average='weighted')
-        string = 'accuracy: {:.2f} ({:d} / {:d}), f1 (weighted): {:.2f}, loss: {:.2e}'.format(
-                accuracy, ncorrects, labels.shape[0], f1, loss)
+        
+        #ind = label_probability.argsort()[:,-self.num_labels_per_image:][::-1] #get largest indices per image
+        predictions = np.zeros(label_probability.shape)
+
+        for i in range(len(label_probability)):
+            ind = label_probability[i].argsort()[-self.num_labels_per_image:][::-1]
+            predictions[i, [ind]]=1
+
+        precision, recall, f_measure, mAP, MAP = self.evaluation_results(predictions, labels, label_probability)
+
+        string = 'precision: {:.2f}, recall : {:.2f}, f_measure: {:.2f}, mAP {:.2f}, MAP {:.2f}'.format(
+                precision, recall, f_measure, np.mean(mAP), np.mean(MAP))
         if sess is None:
             string += '\ntime: {:.0f}s (wall {:.0f}s)'.format(time.process_time()-t_process, time.time()-t_wall)
-        return string, accuracy, f1, loss
+        return string, precision, recall, f_measure, mAP, MAP
 
     def fit(self, train_data, train_labels, val_data, val_labels):
         t_process, t_wall = time.process_time(), time.time()
+        # tesnsorflow usage settings
+        gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.800)
+        sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options))
+        
         sess = tf.Session(graph=self.graph)
         shutil.rmtree(self._get_path('summaries'), ignore_errors=True)
         writer = tf.summary.FileWriter(self._get_path('summaries'), self.graph)
@@ -110,8 +212,11 @@ class base_model(object):
             val_labels = np.expand_dims(val_labels,1) # N * F(=1)
             
         # Training.
-        accuracies = []
-        losses = []
+        precisions = []
+        recalls=[]
+        f_measures=[]
+        mAPs=[]
+        MAPs=[]
         indices = collections.deque()
         num_steps = int(self.num_epochs * train_data.shape[0] / self.batch_size)
         for step in range(1, num_steps+1):
@@ -122,39 +227,59 @@ class base_model(object):
             idx = [indices.popleft() for i in range(self.batch_size)]
 
             batch_data, batch_labels = train_data[idx,:,:], train_labels[idx,:]
+            
+            if len(self.train_laplacians) is not 0:
+                batch_laplacians = [[lap[i] for i in idx] for lap in self.train_laplacians  ]
+            else:
+                batch_laplacians = []
+
+            #print(len(batch_laplacians),type(batch_laplacians))
+            #for i in range(len(batch_laplacians)):
+            #    print(len(batch_laplacians[i]),type(batch_laplacians[i]))
+            
             if type(batch_data) is not np.ndarray:
                 batch_data = batch_data.toarray()  # convert sparse matrices
-            feed_dict = {self.ph_data: batch_data, self.ph_labels: batch_labels, self.ph_dropout: self.dropout}
+
+            feed_dict = {i:d for i,d in zip(self.ph_laplacians, batch_laplacians)}
+            feed_dict.update({self.ph_data: batch_data, self.ph_dropout: 1, self.ph_labels:batch_labels}) 
+
             learning_rate, loss_average = sess.run([self.op_train, self.op_loss_average], feed_dict)
+            #print('  learning_rate = {:.2e}, loss_average = {:.2e}'.format(learning_rate, loss_average))
 
             # Periodical evaluation of the model.
             if step % self.eval_frequency == 0 or step == num_steps:
                 epoch = step * self.batch_size / train_data.shape[0]
                 print('step {} / {} (epoch {:.2f} / {}):'.format(step, num_steps, epoch, self.num_epochs))
                 print('  learning_rate = {:.2e}, loss_average = {:.2e}'.format(learning_rate, loss_average))
-                string, accuracy, f1, loss = self.evaluate(val_data, val_labels, sess)
-                accuracies.append(accuracy)
-                losses.append(loss)
+                string, precision, recall, f_measure, mAP, MAP = self.evaluate(val_data, self.val_laplacians, val_labels, sess)
+                precisions.append(precision)
+                recalls.append(recall)
+                f_measures.append(f_measure)
+                mAPs.append(mAP)
+                MAPs.append(MAP)
                 print('  validation {}'.format(string))
                 print('  time: {:.0f}s (wall {:.0f}s)'.format(time.process_time()-t_process, time.time()-t_wall))
 
                 # Summaries for TensorBoard.
                 summary = tf.Summary()
                 summary.ParseFromString(sess.run(self.op_summary, feed_dict))
-                summary.value.add(tag='validation/accuracy', simple_value=accuracy)
-                summary.value.add(tag='validation/f1', simple_value=f1)
-                summary.value.add(tag='validation/loss', simple_value=loss)
+                summary.value.add(tag='validation/precision', simple_value=precision)
+                summary.value.add(tag='validation/recall', simple_value=recall)
+                summary.value.add(tag='validation/f_measure', simple_value=f_measure)
+                summary.value.add(tag='validation/mAP', simple_value=np.mean(mAP))
+                summary.value.add(tag='validation/MAP', simple_value=np.mean(MAP))
                 writer.add_summary(summary, step)
                 
                 # Save model parameters (for evaluation).
                 self.op_saver.save(sess, path, global_step=step)
 
-        print('validation accuracy: peak = {:.2f}, mean = {:.2f}'.format(max(accuracies), np.mean(accuracies[-10:])))
+        print('validation peaks: precision = {:.2f}, recall = {:.2f}, f_measure = {}, mAP = {}, MAP = {}'.format(max(precisions), max(recalls), max(f_measures), max(np.mean(mAPs, axis=1)), max(np.mean(MAPs, axis=1)) ))
+        print('mAPs is \n',mAPs)
         writer.close()
         sess.close()
         
         t_step = (time.time() - t_wall) / num_steps
-        return accuracies, losses, t_step
+        return np.mean(precisions), np.mean(recalls), np.mean(f_measures), np.mean(np.mean(mAPs, axis=1)), np.mean(np.mean(MAPs, axis=1)) , self.train_laplacians, self.test_laplacians 
 
     def get_var(self, name):
         sess = self._get_session()
@@ -165,7 +290,7 @@ class base_model(object):
 
     # Methods to construct the computational graph.
     
-    def build_graph(self, M_0, F_0, F_last):
+    def build_graph(self, M_0, F_0, F_last, L):
         """Build the computational graph of the model."""
         self.graph = tf.Graph()
         with self.graph.as_default():
@@ -174,10 +299,17 @@ class base_model(object):
             with tf.name_scope('inputs'):
                 self.ph_data = tf.placeholder(tf.float32, (self.batch_size, M_0, F_0), 'data')
                 self.ph_labels = tf.placeholder(tf.int32, (self.batch_size, F_last), 'labels')
+                self.ph_laplacians = []
+
+                for i in range(np.shape(np.array(L))[0]):
+                    string_name = 'lalacians_' + str(i)
+                    self.ph_laplacians.append(tf.placeholder(tf.float32, (self.batch_size, L[i].shape[0], L[i].shape[1]), string_name))
+                    print(i,'th conv layer',self.batch_size,L[i].shape[0], L[i].shape[1])
                 self.ph_dropout = tf.placeholder(tf.float32, (), 'dropout')
+                #print('type(self.ph_laplacians) is ',type(self.ph_laplacians))
 
             # Model.
-            op_logits = self.inference(self.ph_data, self.ph_dropout)
+            op_logits = self.inference(self.ph_data, self.ph_laplacians ,self.ph_dropout)
             self.op_loss, self.op_loss_average = self.loss(op_logits, self.ph_labels, self.regularization)
             self.op_train = self.training(self.op_loss, self.learning_rate,
                     self.decay_steps, self.decay_rate, self.momentum)
@@ -192,7 +324,7 @@ class base_model(object):
         
         self.graph.finalize()
     
-    def inference(self, data, dropout):
+    def inference(self, data, laplacians, dropout):
         """
         It builds the model, i.e. the computational graph, as far as
         is required for running the network forward to make predictions,
@@ -206,7 +338,7 @@ class base_model(object):
             False: the model is built for evaluation.
         """
         # TODO: optimizations for sparse data
-        logits = self._inference(data, dropout)
+        logits = self._inference(data, laplacians, dropout)
         return logits
     
     def probabilities(self, logits):
@@ -219,23 +351,31 @@ class base_model(object):
         #"""Return the predicted classes."""
         """Return the predicted values."""
         with tf.name_scope('prediction'):
-            #prediction = tf.nn.softmax(logits)
-            #return prediction
-            return logits
+            prediction = tf.nn.softmax(logits)
+            return prediction
+            #return logits
 
     def loss(self, logits, labels, regularization):
         """Adds to the inference model the layers required to generate loss."""
         with tf.name_scope('loss'):
             with tf.name_scope('cross_entropy'):
-                labels = tf.cast(labels,tf.float32)
-                #cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits, labels=labels)
-                # cross entopy loss for multilablel problem
-                cross_entropy = tf.reduce_sum(tf.multiply(labels, -tf.log(tf.nn.softmax(logits))), axis=1) 
-                cross_entropy = tf.reduce_mean(cross_entropy)
+                labels = tf.cast(labels, tf.float32)
+                
+                #softmax cross entropy for multilabel
+                #for i in range(len(labels)):
+                #    s = np.sum(labels[i])
+                #    s = max(s,1)
+                #    labels[i]=labels[i]/s
+                #cross_entropy = tf.reduce_sum(tf.multiply(labels, -tf.log(tf.nn.softmax(logits))), axis=1)
+                #cross_entropy = tf.reduce_mean(cross_entropy)
+                
+                #sigmoid cross entropy for multilabel
+                cross_entropy = tf.nn.sigmoid_cross_entropy_with_logits(logits=logits, labels=labels)
+                cross_entropy = tf.reduce_mean(tf.reduce_sum(cross_entropy, axis=1) )
             with tf.name_scope('regularization'):
                 regularization *= tf.add_n(self.regularizers)
             loss = cross_entropy + regularization
-            
+                
             # Summaries for TensorBoard.
             tf.summary.scalar('loss/cross_entropy', cross_entropy)
             tf.summary.scalar('loss/regularization', regularization)
@@ -261,8 +401,8 @@ class base_model(object):
             tf.summary.scalar('learning_rate', learning_rate)
             # Optimizer.
             if momentum == 0:
-                optimizer = tf.train.GradientDescentOptimizer(learning_rate)
-                #optimizer = tf.train.AdamOptimizer(learning_rate=0.001)
+                #optimizer = tf.train.GradientDescentOptimizer(learning_rate)
+                optimizer = tf.train.AdamOptimizer(learning_rate=0.001)
             else:
                 optimizer = tf.train.MomentumOptimizer(learning_rate, momentum)
             grads = optimizer.compute_gradients(loss)
@@ -287,6 +427,9 @@ class base_model(object):
     def _get_session(self, sess=None):
         """Restore parameters if no session given."""
         if sess is None:
+            # tesnsorflow usage settings
+            gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.800)
+            sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options))
             sess = tf.Session(graph=self.graph)
             filename = tf.train.latest_checkpoint(self._get_path('checkpoints'))
             self.op_saver.restore(sess, filename)
@@ -764,12 +907,12 @@ class cgcnn(base_model):
     Directories:
         dir_name: Name for directories (summaries and model parameters).
     """
-    def __init__(self, L, F, F_0, K, p, M, filter='chebyshev5', brelu='b1relu', pool='mpool1',
+    def __init__(self, L, F, F_0, K, p, M,train_laplacians, test_laplacians, val_laplacians,
+                filter='chebyshev5', brelu='b1relu', pool='mpool1',
                 num_epochs=20, learning_rate=0.1, decay_rate=0.95, decay_steps=None, momentum=0.9,
                 regularization=0, dropout=0, batch_size=100, eval_frequency=200,
                 dir_name=''):
         super().__init__()
-        
         # Verify the consistency w.r.t. the number of layers.
         assert len(L) >= len(F) == len(K) == len(p)
         assert np.all(np.array(p) >= 1)
@@ -781,11 +924,20 @@ class cgcnn(base_model):
         M_0 = L[0].shape[0]
         j = 0
         self.L = []
+        self.train_laplacians = []
+        self.val_laplacians = []
+        self.test_laplacians = []
         for pp in p:
             self.L.append(L[j])
+            self.train_laplacians.append(train_laplacians[j])
+            self.val_laplacians.append(val_laplacians[j])
+            self.test_laplacians.append(test_laplacians[j])
             j += int(np.log2(pp)) if pp > 1 else 0
         L = self.L
-        
+        train_laplacians = self.train_laplacians
+        val_laplacians = self.val_laplacians
+        test_laplacians = self.test_laplacians
+
         # Print information about NN architecture.
         Ngconv = len(p)
         Nfc = len(M)
@@ -814,6 +966,15 @@ class cgcnn(base_model):
         
         # Store attributes and bind operations.
         self.L, self.F, self.K, self.p, self.M = L, F, K, p, M
+        self.train_laplacians = train_laplacians
+        self.val_laplacians = val_laplacians
+        self.test_laplacians =  test_laplacians
+        #if type(train_laplacians) is not np.ndarray:
+        #    self.train_laplacians = np.asarray(self.train_laplacians)
+        #if type(val_laplacians) is not np.ndarray:
+        #    self.val_laplacians = np.asarray(self.val_laplacians)
+        #if type(test_laplacians) is not np.ndarray:
+        #    self.test_laplacians = np.asarray(self.test_laplacians)
         self.num_epochs, self.learning_rate = num_epochs, learning_rate
         self.decay_rate, self.decay_steps, self.momentum = decay_rate, decay_steps, momentum
         self.regularization, self.dropout = regularization, dropout
@@ -824,9 +985,9 @@ class cgcnn(base_model):
         self.pool = getattr(self, pool)
         
         # Build the computational graph.
-        self.build_graph(M_0, F_0, M[-1])
+        self.build_graph(M_0, F_0, M[-1], L)
         
-    def filter_in_fourier(self, x, L, Fout, K, U, W):
+    def filter_in_fourier(self, x, laplacians, Fout, K, U, W):
         # TODO: N x F x M would avoid the permutations
         N, M, Fin = x.get_shape()
         N, M, Fin = int(N), int(M), int(Fin)
@@ -844,16 +1005,17 @@ class cgcnn(base_model):
         x = tf.reshape(x, [N, Fout, M])  # N x Fout x M
         return tf.transpose(x, perm=[0, 2, 1])  # N x M x Fout
 
-    def fourier(self, x, L, Fout, K):
-        assert K == L.shape[0]  # artificial but useful to compute number of parameters
+    def fourier(self, x, laplacians, Fout, K):
+        laplacians = laplacians[0]
+        #assert K == L.shape[0]  # artificial but useful to compute number of parameters
         N, M, Fin = x.get_shape()
         N, M, Fin = int(N), int(M), int(Fin)
         # Fourier basis
-        _, U = graph.fourier(L)
+        _, U = graph.fourier(laplacians)
         U = tf.constant(U.T, dtype=tf.float32)
         # Weights
         W = self._weight_variable([M, Fout, Fin], regularization=False)
-        return self.filter_in_fourier(x, L, Fout, K, U, W)
+        return self.filter_in_fourier(x, laplacians, Fout, K, U, W)
 
     def spline(self, x, L, Fout, K):
         N, M, Fin = x.get_shape()
@@ -871,7 +1033,8 @@ class cgcnn(base_model):
         W = tf.reshape(W, [M, Fout, Fin])
         return self.filter_in_fourier(x, L, Fout, K, U, W)
 
-    def chebyshev2(self, x, L, Fout, K):
+    #def chebyshev2(self, x, L, Fout, K):
+    def chebyshev2(self, x, laplacians, Fout, K):
         """
         Filtering with Chebyshev interpolation
         Implementation: numpy.
@@ -884,13 +1047,13 @@ class cgcnn(base_model):
         N, M, Fin = x.get_shape()
         N, M, Fin = int(N), int(M), int(Fin)
         # Rescale Laplacian. Copy to not modify the shared L.
-        L = scipy.sparse.csr_matrix(L)
-        L = graph.rescale_L(L, lmax=2)
+        laplacians = scipy.sparse.csr_matrix(laplacians)
+        laplacians = graph.rescale_L(laplacians, lmax=2)
         # Transform to Chebyshev basis
         x = tf.transpose(x, perm=[1, 2, 0])  # M x Fin x N
         x = tf.reshape(x, [M, Fin*N])  # M x Fin*N
         def chebyshev(x):
-            return graph.chebyshev(L, x, K)
+            return graph.chebyshev(laplacians, x, K)
         x = tf.py_func(chebyshev, [x], [tf.float32])[0]  # K x M x Fin*N
         x = tf.reshape(x, [K, M, Fin, N])  # K x M x Fin x N
         x = tf.transpose(x, perm=[3,1,2,0])  # N x M x Fin x K
@@ -900,32 +1063,41 @@ class cgcnn(base_model):
         x = tf.matmul(x, W)  # N*M x Fout
         return tf.reshape(x, [N, M, Fout])  # N x M x Fout
 
-    def chebyshev5(self, x, L, Fout, K):
+    def chebyshev5(self, x, laplacians, Fout, K):
+        #laplacians = laplacians[0]
         N, M, Fin = x.get_shape()
         N, M, Fin = int(N), int(M), int(Fin)
         # Rescale Laplacian and store as a TF sparse tensor. Copy to not modify the shared L.
-        L = scipy.sparse.csr_matrix(L)
-        L = graph.rescale_L(L, lmax=2)
-        L = L.tocoo()
-        indices = np.column_stack((L.row, L.col))
-        L = tf.SparseTensor(indices, L.data, L.shape)
-        L = tf.sparse_reorder(L)
+        #laplacians = scipy.sparse.csr_matrix(laplacians)
+        #laplacians = graph.rescale_L(laplacians, lmax=2)
+        # todo  rescale lapalcians
+
+        #laplacians = laplacians.tocoo()
+        #indices = np.column_stack((laplacians.row, laplacians.col))
+        #laplacians = tf.SparseTensor(indices, laplacians.data, laplacians.shape)
+        #laplacians = tf.sparse_reorder(laplacians)
         # Transform to Chebyshev basis
-        x0 = tf.transpose(x, perm=[1, 2, 0])  # M x Fin x N
-        x0 = tf.reshape(x0, [M, Fin*N])  # M x Fin*N
-        x = tf.expand_dims(x0, 0)  # 1 x M x Fin*N
+        x0 = x  # N * M * Fin
+        #x0 = tf.transpose(x, perm=[1, 2, 0])  # M x Fin x N
+        #x0 = tf.reshape(x0, [M, Fin*N])  # M x Fin*N
+        x = tf.expand_dims(x0, 0)  # 1 x N x M x FinN
         def concat(x, x_):
-            x_ = tf.expand_dims(x_, 0)  # 1 x M x Fin*N
-            return tf.concat([x, x_], axis=0)  # K x M x Fin*N
+            #x_ = tf.expand_dims(x_, 0)  # 1 x M x Fin*N
+            #return tf.concat([x, x_], axis=0)  # K x M x Fin*N
+            x_ = tf.expand_dims(x_, 0)  # 1 x N x M x Fin
+            return tf.concat([x, x_], axis=0)  # K x N x M x Fin
         if K > 1:
-            x1 = tf.sparse_tensor_dense_matmul(L, x0)
+            #x1 = tf.sparse_tensor_dense_matmul(laplacians, x0)
+            x1 = tf.matmul(laplacians, x0)       # N x M x Fin
             x = concat(x, x1)
         for k in range(2, K):
-            x2 = 2 * tf.sparse_tensor_dense_matmul(L, x1) - x0  # M x Fin*N
+            #x2 = 2 * tf.sparse_tensor_dense_matmul(laplacians, x1) - x0  # M x Fin*N
+            x2 = 2 * tf.matmul(laplacians, x1) - x0   # N x M x Fin
             x = concat(x, x2)
             x0, x1 = x1, x2
-        x = tf.reshape(x, [K, M, Fin, N])  # K x M x Fin x N
-        x = tf.transpose(x, perm=[3,1,2,0])  # N x M x Fin x K
+        #x = tf.reshape(x, [K, M, Fin, N])  # K x M x Fin x N
+        #x = tf.transpose(x, perm=[3,1,2,0])  # N x M x Fin x K
+        x = tf.transpose(x, perm=[1,2,3,0])  # N x M x Fin x K
         x = tf.reshape(x, [N*M, Fin*K])  # N*M x Fin*K
         # Filter: Fin*Fout filters of order K, i.e. one filterbank per feature pair.
         W = self._weight_variable([Fin*K, Fout], regularization=False)
@@ -971,7 +1143,7 @@ class cgcnn(base_model):
         x = tf.matmul(x, W) + b
         return tf.nn.relu(x) if relu else x
 
-    def _inference(self, x, dropout):
+    def _inference(self, x, laplacians, dropout):
         # Graph convolutional layers.
         if len(x.shape) is 2:
             x = tf.expand_dims(x, 2)  # N x M x F(=1)
@@ -979,7 +1151,8 @@ class cgcnn(base_model):
         for i in range(len(self.p)):
             with tf.variable_scope('conv{}'.format(i+1)):
                 with tf.name_scope('filter'):
-                    x = self.filter(x, self.L[i], self.F[i], self.K[i])
+                    #x = self.filter(x, self.L[i], self.F[i], self.K[i])
+                    x = self.filter(x, laplacians[i], self.F[i], self.K[i])
                 with tf.name_scope('bias_relu'):
                     x = self.brelu(x)
                 with tf.name_scope('pooling'):

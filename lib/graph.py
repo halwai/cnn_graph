@@ -135,6 +135,27 @@ def laplacian(W, normalized=True):
     assert type(L) is scipy.sparse.csr.csr_matrix
     return L
 
+def laplacian_dense(W, normalized=True):
+    """Return the Laplacian of the weigth matrix."""
+
+    # Degree matrix.
+    d = W.sum(axis=0)
+
+    # Laplacian matrix.
+    if not normalized:
+        D = scipy.sparse.diags(d.A.squeeze(), 0)
+        L = D - W
+    else:
+        d += np.spacing(np.array(0, W.dtype))
+        d = 1 / np.sqrt(d)
+        D = scipy.sparse.diags(d.A.squeeze(), 0)
+        I = scipy.sparse.identity(d.size, dtype=W.dtype)
+        L = I - D * W * D
+
+    # assert np.abs(L - L.T).mean() < 1e-9
+    assert type(L) is scipy.sparse.csr.csr_matrix
+    return L
+
 
 def lmax(L, normalized=True):
     """Upper-bound on the spectrum."""
@@ -156,6 +177,7 @@ def fourier(L, algo='eigh', k=1):
         lamb, U = np.linalg.eig(L.toarray())
         lamb, U = sort(lamb, U)
     elif algo is 'eigh':
+        print(type(L))
         lamb, U = np.linalg.eigh(L.toarray())
     elif algo is 'eigs':
         lamb, U = scipy.sparse.linalg.eigs(L, k=k, which='SM')
@@ -233,6 +255,7 @@ def rescale_L(L, lmax=2):
     """Rescale the Laplacian eigenvalues in [-1,1]."""
     M, M = L.shape
     I = scipy.sparse.identity(M, format='csr', dtype=L.dtype)
+    #I = np.identity(M)
     L /= lmax / 2
     L -= I
     return L

@@ -1,0 +1,17 @@
+input
+--- for each data point a graph and the coreesponding signal on the graph
+--- a graph on the data point is a (knn or fully connected) on in its neighbours for (M) neighbors we get ---> M*M matrix per data-point
+--- a signal on such a graph is the all labels of its neighbours , for 'L' labels we get M*L matrix  per data-point
+
+ouput
+--- multilabels as in matrix (0 for absence and vice-versa) representation
+
+
+experiments
+--- different NN architectures --- > TODO
+--- different K in KNN (store this rather than recomputing every time)
+--- use FASIS for fast search and diverse labels
+--- fc6 features/ fc7 features / fc5 features
+--- normalize the input data
+--- hypergraph
+--- only knn graph (not fully connected)

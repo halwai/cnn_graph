@@ -251,7 +251,8 @@ def grid_search(params, grid_params, train_data, train_labels, val_data,
         val_labels, test_data, test_labels, model):
     """Explore the hyper-parameter space with an exhaustive grid search."""
     params = params.copy()
-    train_accuracy, test_accuracy, train_f1, test_f1 = [], [], [], []
+    train_precision, test_precision, train_recall, test_recall = [], [], [], []
+    train_fmeasure, test_fmeasure, train_mAP, test_mAP, train_MAP, test_MAP = [], [], [], [], [], []
     grid = sklearn.grid_search.ParameterGrid(grid_params)
     print('grid search: {} combinations to evaluate'.format(len(grid)))
     for grid_params in grid:
@@ -260,41 +261,50 @@ def grid_search(params, grid_params, train_data, train_labels, val_data,
         print('\n\n  {}  \n\n'.format(grid_params))
         m = model(params)
         m.fit(train_data, train_labels, val_data, val_labels)
-        string, accuracy, f1, loss = m.evaluate(train_data, train_labels)
-        train_accuracy.append('{:5.2f}'.format(accuracy)); train_f1.append('{:5.2f}'.format(f1))
+        string, precision, recall, f_measure, mAP, MAP = m.evaluate(train_data, train_labels)
+        train_precision.append('{:5.2f}'.format(precision)); train_recall.append('{:5.2f}'.format(recall)); train_fmeasure.append('{:5.2f}'.format(f_measure))
+        train_mAP.append(mAP); train_MAP.append(MAP)
+
         print('train {}'.format(string))
-        string, accuracy, f1, loss = m.evaluate(test_data, test_labels)
-        test_accuracy.append('{:5.2f}'.format(accuracy)); test_f1.append('{:5.2f}'.format(f1))
+        string, precision, recall, f_measure, mAP, MAP = m.evaluate(test_data, test_labels)
+        test_precision.append('{:5.2f}'.format(precision)); test_recall.append('{:5.2f}'.format(recall)); test_fmeasure.append('{:5.2f}'.format(f_measure))
+        test_mAP.append(mAP); test_MAP.append(MAP)
         print('test  {}'.format(string))
     print('\n\n')
-    print('Train accuracy:      {}'.format(' '.join(train_accuracy)))
-    print('Test accuracy:       {}'.format(' '.join(test_accuracy)))
-    print('Train F1 (weighted): {}'.format(' '.join(train_f1)))
-    print('Test F1 (weighted):  {}'.format(' '.join(test_f1)))
+    print('Train precision:      {}'.format(' '.join(train_precision)))
+    print('Test precision:       {}'.format(' '.join(test_precision)))
+    print('Train recall:      {}'.format(' '.join(train_recall)))
+    print('Test recall:       {}'.format(' '.join(test_recall)))
+    print('Train f_measure: {}'.format(' '.join(train_fmeasure)))
+    print('Test f_measure:  {}'.format(' '.join(test_fmeasure)))
+    print('Train mAP: {}'.format(' '.join(np.mean(train_mAP, axis=1))))
+    print('Test mAP:  {}'.format(' '.join(np.mean(test_mAP, axis=1))))
+    print('Train MAP: {}'.format(' '.join(np.mean(train_MAP, axis=1))))
+    print('Test MAP:  {}'.format(' '.join(np.mean(test_MAP, axis=1))))
     for i,grid_params in enumerate(grid):
-        print('{} --> {} {} {} {}'.format(grid_params, train_accuracy[i], test_accuracy[i], train_f1[i], test_f1[i]))
-
+        print('{} --> {} {} {} {} {} {} {} {} {} {}'.format(grid_params, train_precision[i], test_precision[i], train_recall[i], test_recall[i], train_fmeasure[i], test_fmeasure[i], np.mean(train_mAP[i]), np.mean(test_mAP[i]), np.mean(train_MAP[i]), np.mean(test_MAP[i])))
 
 class model_perf(object):
 
     def __init__(s):
         s.names, s.params = set(), {}
-        s.fit_accuracies, s.fit_losses, s.fit_time = {}, {}, {}
-        s.train_accuracy, s.train_f1, s.train_loss = {}, {}, {}
-        s.test_accuracy, s.test_f1, s.test_loss = {}, {}, {}
+        s.fit_precision, s.fit_recall, s.fit_fmeasure, s.fit_mAP, s.fit_MAP, s.fit_time = {}, {}, {}, {}, {}, {}
+        s.train_precision, s.train_recall, s.train_fmeasure, s.train_mAP, s.train_MAP, s.train_time = {}, {}, {}, {}, {}, {}
+        s.test_precision, s.test_recall, s.test_fmeasure, s.test_mAP, s.test_MAP, s.test_time = {}, {}, {}, {}, {}, {}
 
     def test(s, model, name, params, train_data, train_labels, val_data, val_labels, test_data, test_labels):
         s.params[name] = params
-        s.fit_accuracies[name], s.fit_losses[name], s.fit_time[name] = \
+        s.fit_precision[name], s.fit_recall[name], s.fit_fmeasure[name], s.fit_mAP[name], s.fit_MAP[name], train_laplacians, test_laplacians = \
                 model.fit(train_data, train_labels, val_data, val_labels)
-        string, s.train_accuracy[name], s.train_f1[name], s.train_loss[name] = \
-                model.evaluate(train_data, train_labels)
+        string, s.train_precision[name], s.train_recall[name], s.train_fmeasure[name], s.train_mAP[name], s.train_MAP[name] = \
+                model.evaluate(train_data, train_laplacians, train_labels)
         print('train {}'.format(string))
-        string, s.test_accuracy[name], s.test_f1[name], s.test_loss[name] = \
-                model.evaluate(test_data, test_labels)
+        string, s.test_precision[name], s.test_recall[name], s.test_fmeasure[name], s.test_mAP[name], s.test_MAP[name] = \
+                model.evaluate(test_data, test_laplacians, test_labels)
         print('test  {}'.format(string))
         s.names.add(name)
-
+        
+                
     def show(s, fontsize=None):
         if fontsize:
             plt.rc('pdf', fonttype=42)

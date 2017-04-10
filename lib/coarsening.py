@@ -14,19 +14,22 @@ def coarsen(A, levels, self_connections=False):
         M, M = A.shape
 
         if not self_connections:
+            #A = A * (1 - np.identity(A.shape[0]))
             A = A.tocoo()
             A.setdiag(0)
-
+            
         if i < levels:
             A = perm_adjacency(A, perms[i])
+            #A = perm_adjacency_numpy(A, perms[i])
 
         A = A.tocsr()
         A.eliminate_zeros()
         graphs[i] = A
 
         Mnew, Mnew = A.shape
-        print('Layer {0}: M_{0} = |V| = {1} nodes ({2} added),'
-              '|E| = {3} edges'.format(i, Mnew, Mnew-M, A.nnz//2))
+        #print('Layer {0}: M_{0} = |V| = {1} nodes ({2} added),'
+        #      '|E| = {3} edges'.format(i, Mnew, Mnew-M, A.nnz//2))
+    
 
     return graphs, perms[0] if levels > 0 else None
 
@@ -245,6 +248,31 @@ def perm_data(x, indices):
         
     return xnew
 
+def perm_data_point(x, indices):
+    """
+    Permute data point(single sample), i.e. exchange node ids,
+    so that binary unions form the clustering tree.
+    """
+    if indices is None:
+        return x
+    assert len(x.shape) is 2
+                
+    M, N = x.shape
+    Mnew = len(indices)
+    assert Mnew >= M
+    xnew = np.empty((Mnew, N))
+    for i,j in enumerate(indices):
+        # Existing vertex, i.e. real data.
+        if j < M:
+            xnew[i,:] = x[j,:]
+        # Fake vertex because of singeltons.
+        # They will stay 0 so that max pooling chooses the singelton.
+        # Or -infty ?
+        else:
+            xnew[i,:] = np.zeros((N))
+    return xnew
+
+
 def perm_adjacency(A, indices):
     """
     Permute adjacency matrix, i.e. exchange node ids,
@@ -272,4 +300,37 @@ def perm_adjacency(A, indices):
 
     # assert np.abs(A - A.T).mean() < 1e-9
     assert type(A) is scipy.sparse.coo.coo_matrix
+    return A
+
+def perm_adjacency_numpy(A, indices):
+    """
+    Permute adjacency matrix, i.e. exchange node ids,
+    so that binary unions form the clustering tree.
+    """
+    if type(A)  is scipy.sparse.csr.csr_matrix:
+        A = A.toarray()
+        print('here', type(A))
+    if indices is None:
+        return A
+
+    M, M = A.shape
+    Mnew = len(indices)
+    assert Mnew >= M
+
+    # Add Mnew - M isolated vertices.
+    print(Mnew,M)
+    if Mnew > M:
+        rows = np.zeros((Mnew-M, Mnew) , dtype=A.dtype)
+        cols = np.zeros((M , Mnew-M), dtype=A.dtype)
+        A = np.concatenate((A, cols), axis = 1)
+        A = np.concatenate((A, rows), axis = 0)
+        
+    # Permute the rows and the columns.
+    perm = np.argsort(indices)
+    A[:,:] = A[perm,:]
+    A[:,:] = A[:,perm]
+
+    assert np.abs(A - A.T).mean() < 1e-9
+    assert type(A) is np.ndarray
+
     return A
