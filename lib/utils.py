@@ -296,6 +296,13 @@ class model_perf(object):
         s.params[name] = params
         s.fit_precision[name], s.fit_recall[name], s.fit_fmeasure[name], s.fit_mAP[name], s.fit_MAP[name], train_laplacians, test_laplacians = \
                 model.fit(train_data, train_labels, val_data, val_labels)
+        print(len(train_laplacians), type(train_laplacians))
+        #for i in range(len(train_laplacians[0])):
+        #    print(train_laplacians[0][i])
+        print(len(test_laplacians), type(test_laplacians))
+        #for i in range(len(test_laplacians[0][0])):
+        #    print(test_laplacians[0][0][i])
+        
         string, s.train_precision[name], s.train_recall[name], s.train_fmeasure[name], s.train_mAP[name], s.train_MAP[name] = \
                 model.evaluate(train_data, train_laplacians, train_labels)
         print('train {}'.format(string))

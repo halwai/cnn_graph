@@ -16,9 +16,9 @@ import os, time, collections, shutil
 
 class base_model(object):
     
-    def __init__(self):
+    def __init__(self , num_labels_per_image):
         self.regularizers = []
-        self.num_labels_per_image = 2
+        self.num_labels_per_image = num_labels_per_image
     
     # High-level interface which runs the constructed computational graph.
     def evaluation_results(self, predictions, labels, label_probability):
@@ -133,7 +133,7 @@ class base_model(object):
                 tmp_data = tmp_data.toarray()  # convert sparse matrices
             batch_data[:end-begin,:,:] = tmp_data
             
-            feed_dict = {i:d for i,d in zip(self.ph_laplacians,batch_laplacians)}
+            feed_dict = {i:d for i,d in zip(self.ph_laplacians, batch_laplacians)}
             feed_dict.update({self.ph_data: batch_data, self.ph_dropout: 1}) 
             
             # Compute loss if labels are given.
@@ -190,7 +190,7 @@ class base_model(object):
     def fit(self, train_data, train_labels, val_data, val_labels):
         t_process, t_wall = time.process_time(), time.time()
         # tesnsorflow usage settings
-        gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.800)
+        gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.400)
         sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options))
         
         sess = tf.Session(graph=self.graph)
@@ -274,12 +274,13 @@ class base_model(object):
                 self.op_saver.save(sess, path, global_step=step)
 
         print('validation peaks: precision = {:.2f}, recall = {:.2f}, f_measure = {}, mAP = {}, MAP = {}'.format(max(precisions), max(recalls), max(f_measures), max(np.mean(mAPs, axis=1)), max(np.mean(MAPs, axis=1)) ))
-        print('mAPs is \n',mAPs)
+        #print('mAPs is \n',mAPs)
         writer.close()
         sess.close()
         
         t_step = (time.time() - t_wall) / num_steps
-        return np.mean(precisions), np.mean(recalls), np.mean(f_measures), np.mean(np.mean(mAPs, axis=1)), np.mean(np.mean(MAPs, axis=1)) , self.train_laplacians, self.test_laplacians 
+        print(type(self.train_laplacians) , type(self.test_laplacians))
+        return np.mean(precisions), np.mean(recalls), np.mean(f_measures), np.mean(np.mean(mAPs, axis=1)), np.mean(np.mean(MAPs, axis=1)) , self.train_laplacians, self.test_laplacians
 
     def get_var(self, name):
         sess = self._get_session()
@@ -428,7 +429,7 @@ class base_model(object):
         """Restore parameters if no session given."""
         if sess is None:
             # tesnsorflow usage settings
-            gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.800)
+            gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.400)
             sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options))
             sess = tf.Session(graph=self.graph)
             filename = tf.train.latest_checkpoint(self._get_path('checkpoints'))
@@ -907,12 +908,12 @@ class cgcnn(base_model):
     Directories:
         dir_name: Name for directories (summaries and model parameters).
     """
-    def __init__(self, L, F, F_0, K, p, M,train_laplacians, test_laplacians, val_laplacians,
+    def __init__(self, L, num_labels_per_image, F, F_0, K, p, M,train_laplacians, test_laplacians, val_laplacians,
                 filter='chebyshev5', brelu='b1relu', pool='mpool1',
                 num_epochs=20, learning_rate=0.1, decay_rate=0.95, decay_steps=None, momentum=0.9,
                 regularization=0, dropout=0, batch_size=100, eval_frequency=200,
                 dir_name=''):
-        super().__init__()
+        super().__init__(num_labels_per_image)
         # Verify the consistency w.r.t. the number of layers.
         assert len(L) >= len(F) == len(K) == len(p)
         assert np.all(np.array(p) >= 1)

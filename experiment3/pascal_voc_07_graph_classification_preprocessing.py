@@ -11,9 +11,9 @@ import sys
 
 def preprocess(k=100):
 
-    base_ftrs_dir = '/home/halwai/coursework/honors/Datasets/PASCAL_VOC/Ftrs/vgg16/'
-    base_labels_dir = '/home/halwai/coursework/honors/Datasets/PASCAL_VOC/Labels/'
-    base_storage_dir = '/home/halwai/coursework/honors/Datasets/PASCAL_VOC/GCN/preprocessing/experiment3/'
+    base_ftrs_dir = '/data4/abhijeet/Datasets/PASCAL_VOC/Ftrs/vgg16/'
+    base_labels_dir = '/data4/abhijeet/Datasets/PASCAL_VOC/Labels/'
+    base_storage_dir = '/data4/abhijeet/Datasets/PASCAL_VOC/GCN/preprocessing/experiment3/'
 
 
     temp_filename = base_storage_dir + 'scikit_fc7_k_' + str(k) + '.mat'
@@ -86,6 +86,7 @@ def preprocess(k=100):
         gamma = np.max(np.max(temp_adjacency))
         temp_adjacency = np.exp(-temp_adjacency/(gamma**2))
         #Adjacency_train[i,:,:] = temp_adjacency
+        #temp_adjacency = (temp_adjacency + temp_adjacency.T) / 2
         Adjacency_train.append(csr_matrix(temp_adjacency))        
 
     print(time.time() - t)
@@ -97,8 +98,8 @@ def preprocess(k=100):
         temp_adjacency = euclidean_distances(temp_x,temp_x)
         gamma = np.max(np.max(temp_adjacency))
         temp_adjacency = np.exp(-temp_adjacency/(gamma**2))
-        # TODO have a look latet
-        temp_adjacency = (temp_adjacency + temp_adjacency.T) / 2
+        # TODO have a look later
+        #temp_adjacency = (temp_adjacency + temp_adjacency.T) / 2
         #Adjacency_test[i,:,:] = temp_adjacency
         Adjacency_test.append(csr_matrix(temp_adjacency))
         
@@ -112,7 +113,7 @@ def preprocess(k=100):
     print(time.time() - t)
 
 if __name__ == "__main__":
-    for k in range(100,110,30):
+    for k in range(20,500,30):
         preprocess(k)
         print("\n\n Preprocessing Done for K= ",k,"\n\n")
 
