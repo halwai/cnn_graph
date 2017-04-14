@@ -84,6 +84,7 @@ def preprocess(k=100):
         temp_x = train_ftrs[indices_train[i,:], :]
         temp_adjacency = euclidean_distances(temp_x,temp_x)
         gamma = np.max(np.max(temp_adjacency))
+        temp_adjacency = temp_adjacency * temp_adjacency
         temp_adjacency = np.exp(-temp_adjacency/(gamma**2))
         #Adjacency_train[i,:,:] = temp_adjacency
         #temp_adjacency = (temp_adjacency + temp_adjacency.T) / 2
@@ -97,6 +98,7 @@ def preprocess(k=100):
         temp_x = train_ftrs[indices_test[i,:], :]
         temp_adjacency = euclidean_distances(temp_x,temp_x)
         gamma = np.max(np.max(temp_adjacency))
+        temp_adjacency = temp_adjacency * temp_adjacency
         temp_adjacency = np.exp(-temp_adjacency/(gamma**2))
         # TODO have a look later
         #temp_adjacency = (temp_adjacency + temp_adjacency.T) / 2
@@ -113,7 +115,7 @@ def preprocess(k=100):
     print(time.time() - t)
 
 if __name__ == "__main__":
-    for k in range(20,500,30):
+    for k in range(110, 140, 30):
         preprocess(k)
         print("\n\n Preprocessing Done for K= ",k,"\n\n")
 

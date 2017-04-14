@@ -134,7 +134,7 @@ class base_model(object):
             batch_data[:end-begin,:,:] = tmp_data
             
             feed_dict = {i:d for i,d in zip(self.ph_laplacians, batch_laplacians)}
-            feed_dict.update({self.ph_data: batch_data, self.ph_dropout: 1}) 
+            feed_dict.update({self.ph_data: batch_data, self.ph_dropout: self.dropout}) 
             
             # Compute loss if labels are given.
             if labels is not None:
@@ -241,7 +241,7 @@ class base_model(object):
                 batch_data = batch_data.toarray()  # convert sparse matrices
 
             feed_dict = {i:d for i,d in zip(self.ph_laplacians, batch_laplacians)}
-            feed_dict.update({self.ph_data: batch_data, self.ph_dropout: 1, self.ph_labels:batch_labels}) 
+            feed_dict.update({self.ph_data: batch_data, self.ph_dropout: self.dropout, self.ph_labels:batch_labels}) 
 
             learning_rate, loss_average = sess.run([self.op_train, self.op_loss_average], feed_dict)
             #print('  learning_rate = {:.2e}, loss_average = {:.2e}'.format(learning_rate, loss_average))
@@ -402,8 +402,8 @@ class base_model(object):
             tf.summary.scalar('learning_rate', learning_rate)
             # Optimizer.
             if momentum == 0:
-                #optimizer = tf.train.GradientDescentOptimizer(learning_rate)
-                optimizer = tf.train.AdamOptimizer(learning_rate=0.001)
+                optimizer = tf.train.GradientDescentOptimizer(learning_rate)
+                #optimizer = tf.train.AdamOptimizer(learning_rate=0.001)
             else:
                 optimizer = tf.train.MomentumOptimizer(learning_rate, momentum)
             grads = optimizer.compute_gradients(loss)
@@ -908,7 +908,7 @@ class cgcnn(base_model):
     Directories:
         dir_name: Name for directories (summaries and model parameters).
     """
-    def __init__(self, L, num_labels_per_image, F, F_0, K, p, M,train_laplacians, test_laplacians, val_laplacians,
+    def __init__(self, L, num_labels_per_image, F, F_0, K, p, M, train_laplacians, test_laplacians, val_laplacians,
                 filter='chebyshev5', brelu='b1relu', pool='mpool1',
                 num_epochs=20, learning_rate=0.1, decay_rate=0.95, decay_steps=None, momentum=0.9,
                 regularization=0, dropout=0, batch_size=100, eval_frequency=200,

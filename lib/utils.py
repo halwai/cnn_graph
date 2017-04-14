@@ -296,13 +296,6 @@ class model_perf(object):
         s.params[name] = params
         s.fit_precision[name], s.fit_recall[name], s.fit_fmeasure[name], s.fit_mAP[name], s.fit_MAP[name], train_laplacians, test_laplacians = \
                 model.fit(train_data, train_labels, val_data, val_labels)
-        print(len(train_laplacians), type(train_laplacians))
-        #for i in range(len(train_laplacians[0])):
-        #    print(train_laplacians[0][i])
-        print(len(test_laplacians), type(test_laplacians))
-        #for i in range(len(test_laplacians[0][0])):
-        #    print(test_laplacians[0][0][i])
-        
         string, s.train_precision[name], s.train_recall[name], s.train_fmeasure[name], s.train_mAP[name], s.train_MAP[name] = \
                 model.evaluate(train_data, train_laplacians, train_labels)
         print('train {}'.format(string))
@@ -326,23 +319,23 @@ class model_perf(object):
         print('  accuracy        F1             loss        time [ms]  name')
         print('test  train   test  train   test     train')
         for name in sorted(s.names):
-            print('{:5.2f} {:5.2f}   {:5.2f} {:5.2f}   {:.2e} {:.2e}   {:3.0f}   {}'.format(
-                    s.test_accuracy[name], s.train_accuracy[name],
-                    s.test_f1[name], s.train_f1[name],
+            print('{:5.2f} {:5.2f}   {:5.2f} {:5.2f}   {:.2e} {:.2e}   {:3.0f}   {}'.format(        
+                    s.test_precision[name], s.train_precision[name],
+                    s.test_fmeasure[name], s.train_fmeasure[name],
                     s.test_loss[name], s.train_loss[name], s.fit_time[name]*1000, name))
 
         fig, ax = plt.subplots(1, 2, figsize=(15, 5))
         for name in sorted(s.names):
-            steps = np.arange(len(s.fit_accuracies[name])) + 1
+            steps = np.arange(len(s.fit_precision[name])) + 1
             steps *= s.params[name]['eval_frequency']
-            ax[0].plot(steps, s.fit_accuracies[name], '.-', label=name)
-            ax[1].plot(steps, s.fit_losses[name], '.-', label=name)
+            ax[0].plot(steps, s.fit_precision[name], '.-', label=name)
+            #ax[1].plot(steps, s.fit_losses[name], '.-', label=name)
         ax[0].set_xlim(min(steps), max(steps))
-        ax[1].set_xlim(min(steps), max(steps))
+        #ax[1].set_xlim(min(steps), max(steps))
         ax[0].set_xlabel('step')
-        ax[1].set_xlabel('step')
-        ax[0].set_ylabel('validation accuracy')
-        ax[1].set_ylabel('training loss')
+        #ax[1].set_xlabel('step')
+        ax[0].set_ylabel('validation precision')
+        #ax[1].set_ylabel('training loss')
         ax[0].legend(loc='lower right')
-        ax[1].legend(loc='upper right')
+        #ax[1].legend(loc='upper right')
         #fig.savefig('training.pdf')
